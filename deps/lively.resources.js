@@ -674,7 +674,118 @@ var _typeof = typeof Symbol === "function" && typeof Symbol.iterator === "symbol
 
 
 
+var asyncGenerator = function () {
+  function AwaitValue(value) {
+    this.value = value;
+  }
 
+  function AsyncGenerator(gen) {
+    var front, back;
+
+    function send(key, arg) {
+      return new Promise(function (resolve, reject) {
+        var request = {
+          key: key,
+          arg: arg,
+          resolve: resolve,
+          reject: reject,
+          next: null
+        };
+
+        if (back) {
+          back = back.next = request;
+        } else {
+          front = back = request;
+          resume(key, arg);
+        }
+      });
+    }
+
+    function resume(key, arg) {
+      try {
+        var result = gen[key](arg);
+        var value = result.value;
+
+        if (value instanceof AwaitValue) {
+          Promise.resolve(value.value).then(function (arg) {
+            resume("next", arg);
+          }, function (arg) {
+            resume("throw", arg);
+          });
+        } else {
+          settle(result.done ? "return" : "normal", result.value);
+        }
+      } catch (err) {
+        settle("throw", err);
+      }
+    }
+
+    function settle(type, value) {
+      switch (type) {
+        case "return":
+          front.resolve({
+            value: value,
+            done: true
+          });
+          break;
+
+        case "throw":
+          front.reject(value);
+          break;
+
+        default:
+          front.resolve({
+            value: value,
+            done: false
+          });
+          break;
+      }
+
+      front = front.next;
+
+      if (front) {
+        resume(front.key, front.arg);
+      } else {
+        back = null;
+      }
+    }
+
+    this._invoke = send;
+
+    if (typeof gen.return !== "function") {
+      this.return = undefined;
+    }
+  }
+
+  if (typeof Symbol === "function" && Symbol.asyncIterator) {
+    AsyncGenerator.prototype[Symbol.asyncIterator] = function () {
+      return this;
+    };
+  }
+
+  AsyncGenerator.prototype.next = function (arg) {
+    return this._invoke("next", arg);
+  };
+
+  AsyncGenerator.prototype.throw = function (arg) {
+    return this._invoke("throw", arg);
+  };
+
+  AsyncGenerator.prototype.return = function (arg) {
+    return this._invoke("return", arg);
+  };
+
+  return {
+    wrap: function (fn) {
+      return function () {
+        return new AsyncGenerator(fn.apply(this, arguments));
+      };
+    },
+    await: function (value) {
+      return new AwaitValue(value);
+    }
+  };
+}();
 
 
 
@@ -834,6 +945,191 @@ var set$1 = function set$1(object, property, value, receiver) {
   return value;
 };
 
+var slicedToArray = function () {
+  function sliceIterator(arr, i) {
+    var _arr = [];
+    var _n = true;
+    var _d = false;
+    var _e = undefined;
+
+    try {
+      for (var _i = arr[Symbol.iterator](), _s; !(_n = (_s = _i.next()).done); _n = true) {
+        _arr.push(_s.value);
+
+        if (i && _arr.length === i) break;
+      }
+    } catch (err) {
+      _d = true;
+      _e = err;
+    } finally {
+      try {
+        if (!_n && _i["return"]) _i["return"]();
+      } finally {
+        if (_d) throw _e;
+      }
+    }
+
+    return _arr;
+  }
+
+  return function (arr, i) {
+    if (Array.isArray(arr)) {
+      return arr;
+    } else if (Symbol.iterator in Object(arr)) {
+      return sliceIterator(arr, i);
+    } else {
+      throw new TypeError("Invalid attempt to destructure non-iterable instance");
+    }
+  };
+}();
+
+function applyExclude(exclude, resources) {
+  if (Array.isArray(exclude)) return exclude.reduce(function (intersect, exclude) {
+    return applyExclude(exclude, intersect);
+  }, resources);
+  if (typeof exclude === "string") return resources.filter(function (ea) {
+    return ea.path() !== exclude && ea.name() !== exclude;
+  });
+  if (exclude instanceof RegExp) return resources.filter(function (ea) {
+    return !exclude.test(ea.path()) && !exclude.test(ea.name());
+  });
+  if (typeof exclude === "function") return resources.filter(function (ea) {
+    return !exclude(ea);
+  });
+  return resources;
+}
+
+/*
+
+applyExclude(["foo", "foo"], [
+  {path: () => "foo", name: () => "foo"},
+  {path: () => "bar", name: () => "bar"},
+  {path: () => "baz", name: () => "baz"}
+])
+
+applyExclude(["bar", "foo"], [
+  {path: () => "foo", name: () => "foo"},
+  {path: () => "bar", name: () => "bar"},
+  {path: () => "baz", name: () => "baz"}
+])
+
+*/
+
+// parseQuery('?hello=world&x={"foo":{"bar": "baz"}}')
+// parseQuery("?db=test-object-db&url=lively.morphic%2Fworlds%2Fdefault.json&type=world&name=default&commitSpec=%7B%22user%22%3A%7B%22name%22%3A%22robert%22%2C%22realm%22%3A%22https%3A%2F%2Fauth.lively-next.org%22%2C%22email%22%3A%22robert%40kra.hn%22%7D%2C%22description%22%3A%22An%20empty%20world.%20A%20place%20to%20start%20from%20scratch.%22%2C%22metadata%22%3A%7B%22belongsToCore%22%3Atrue%7D%7D&purgeHistory=true")
+
+function parseQuery(url) {
+  var url = url;
+
+  var _url$split = url.split("?");
+
+  var _url$split2 = slicedToArray(_url$split, 2);
+
+  var _ = _url$split2[0];
+  var search = _url$split2[1];
+  var query = {};
+  if (!search) return query;
+  var args = search.split("&");
+  if (args) for (var i = 0; i < args.length; i++) {
+    var keyAndVal = args[i].split("="),
+        key = keyAndVal[0],
+        val = true;
+    if (keyAndVal.length > 1) {
+      val = decodeURIComponent(keyAndVal.slice(1).join("="));
+      if (val === "undefined") val = undefined;else if (val.match(/^(true|false|null|[0-9"[{].*)$/)) try {
+        val = JSON.parse(val);
+      } catch (e) {
+        if (val[0] === "[") val = val.slice(1, -1).split(","); // handle string arrays
+        // if not JSON use string itself
+      }
+    }
+    query[key] = val;
+  }
+  return query;
+}
+
+// -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
+
+var slashEndRe$1 = /\/+$/;
+var slashStartRe$1 = /^\/+/;
+var urlRe = /^([^:\/]+):\/\/([^\/]*)(.*)/;
+var pathDotRe = /\/\.\//g;
+var pathDoubleDotRe = /\/[^\/]+\/\.\./;
+var pathDoubleSlashRe = /(^|[^:])[\/]+/g;
+
+function withRelativePartsResolved$1(inputPath) {
+  var path = inputPath,
+      result = path;
+
+  // /foo/../bar --> /bar
+  do {
+    path = result;
+    result = path.replace(pathDoubleDotRe, '');
+  } while (result != path);
+
+  // foo//bar --> foo/bar
+  result = result.replace(pathDoubleSlashRe, '$1/');
+
+  // foo/./bar --> foo/bar
+  result = result.replace(pathDotRe, '/');
+
+  return result;
+}
+
+function _relativePathBetween_checkPathes(path1, path2) {
+  if (path1.startsWith("/")) path1 = path1.slice(1);
+  if (path2.startsWith("/")) path2 = path2.slice(1);
+  var paths1 = path1.split('/'),
+      paths2 = path2.split('/');
+  for (var i = 0; i < paths2.length; i++) {
+    if (!paths1[i] || paths1[i] != paths2[i]) break;
+  } // now that's some JavaScript FOO
+  var result = '../'.repeat(Math.max(0, paths2.length - i - 1)) + paths1.splice(i, paths1.length).join('/');
+  return result;
+}
+
+// pathA = "http://foo/bar/"
+// pathB = "http://foo/bar/oink/baz.js";
+
+function relativePathBetween(pathA, pathB) {
+  // produces the relative path to get from `pathA` to `pathB`
+  // Example:
+  //   relativePathBetween("/foo/bar/", "/foo/baz.js"); // => ../baz.js
+  var urlMatchA = pathA.match(urlRe),
+      urlMatchB = pathB.match(urlRe),
+      protocolA = void 0,
+      domainA = void 0,
+      protocolB = void 0,
+      domainB = void 0,
+      compatible = true;
+  if (urlMatchA && !urlMatchB || !urlMatchA && urlMatchB) compatible = false;
+  if (urlMatchA && urlMatchB) {
+    protocolA = urlMatchA[1];
+    domainA = urlMatchA[2];
+    protocolB = urlMatchB[1];
+    domainB = urlMatchB[2];
+    if (protocolA !== protocolB) compatible = false;else if (domainA !== domainB) compatible = false;else {
+      pathA = urlMatchA[3];pathB = urlMatchB[3];
+    }
+  }
+  if (!compatible) throw new Error("[relativePathBetween] incompatible paths: " + pathA + " vs. " + pathB);
+  pathA = withRelativePartsResolved$1(pathA);
+  pathB = withRelativePartsResolved$1(pathB);
+  if (pathA == pathB) return '';
+  var relPath = _relativePathBetween_checkPathes(pathB, pathA);
+  if (!relPath) throw new Error('pathname differs in relativePathFrom ' + pathA + ' vs ' + pathB);
+  return relPath;
+}
+
+function join$1(pathA, pathB) {
+  return withRelativePartsResolved$1(pathA.replace(slashEndRe$1, "") + "/" + pathB.replace(slashStartRe$1, ""));
+}
+
+function parent$1(path) {
+  if (!path.startsWith("/")) return "";
+  return path.replace(slashEndRe$1, "").split("/").slice(0, -1).join("/") + "/";
+}
+
 var slashEndRe = /\/+$/;
 var slashStartRe = /^\/+/;
 var protocolRe = /^[a-z0-9-_\.]+:/;
@@ -903,9 +1199,43 @@ var Resource$$1 = function () {
       return path === "" ? "/" : path;
     }
   }, {
+    key: "pathWithoutQuery",
+    value: function pathWithoutQuery() {
+      return this.path().split("?")[0];
+    }
+  }, {
     key: "name",
     value: function name() {
-      return this.path().replace(/\/$/, "").split("/").slice(-1)[0];
+      var path = this.path(),
+          queryIndex = path.lastIndexOf("?");
+      if (queryIndex > -1) path = path.slice(0, queryIndex);
+      if (path.endsWith("/")) path = path.slice(0, -1);
+      var parts = path.split("/"),
+          lastPart = parts[parts.length - 1];
+      return decodeURIComponent(lastPart);
+    }
+  }, {
+    key: "ext",
+    value: function ext() {
+      var url = this.url;
+      if (url.endsWith("/")) return "";
+
+      var _ref = url.match(/\.([^\/\.]+$)/) || ["", ""];
+
+      var _ref2 = slicedToArray(_ref, 2);
+
+      var _ = _ref2[0];
+      var ext = _ref2[1];
+
+      return ext.toLowerCase();
+    }
+  }, {
+    key: "nameWithoutExt",
+    value: function nameWithoutExt() {
+      var name = this.name(),
+          extIndex = name.lastIndexOf(".");
+      if (extIndex > 0) name = name.slice(0, extIndex);
+      return name;
     }
   }, {
     key: "scheme",
@@ -930,8 +1260,7 @@ var Resource$$1 = function () {
   }, {
     key: "parent",
     value: function parent() {
-      if (this.isRoot()) return null;
-      return this.newResource(this.url.replace(slashEndRe, "").split("/").slice(0, -1).join("/") + "/");
+      return this.isRoot() ? null : this.newResource(this.url.replace(slashEndRe, "").split("/").slice(0, -1).join("/") + "/");
     }
   }, {
     key: "parents",
@@ -951,6 +1280,26 @@ var Resource$$1 = function () {
       return otherRes.schemeAndHost() === this.schemeAndHost() && otherRes.parents().some(function (p) {
         return p.equals(_this);
       });
+    }
+  }, {
+    key: "query",
+    value: function query() {
+      return parseQuery(this.url);
+    }
+  }, {
+    key: "withQuery",
+    value: function withQuery(queryObj) {
+      var query = _extends({}, this.query(), queryObj);
+
+      var _url$split = this.url.split("?");
+
+      var _url$split2 = slicedToArray(_url$split, 1);
+
+      var url = _url$split2[0];
+      var queryString = Object.keys(query).map(function (key) {
+        return key + "=" + encodeURIComponent(String(query[key]));
+      }).join("&");
+      return this.newResource(url + "?" + queryString);
     }
   }, {
     key: "commonDirectory",
@@ -974,57 +1323,26 @@ var Resource$$1 = function () {
     key: "withRelativePartsResolved",
     value: function withRelativePartsResolved() {
       var path = this.path(),
-          result = path;
-      // /foo/../bar --> /bar
-      do {
-        path = result;
-        result = path.replace(/\/[^\/]+\/\.\./, '');
-      } while (result != path);
-
-      // foo//bar --> foo/bar
-      result = result.replace(/(^|[^:])[\/]+/g, '$1/');
-      // foo/./bar --> foo/bar
-      result = result.replace(/\/\.\//g, '/');
-      if (result === this.path()) return this;
+          result = withRelativePartsResolved$1(path);
+      if (result === path) return this;
       if (result.startsWith("/")) result = result.slice(1);
       return this.newResource(this.root().url + result);
     }
   }, {
     key: "relativePathFrom",
     value: function relativePathFrom(fromResource) {
-      if (fromResource.root().url != this.root().url) throw new Error('hostname differs in relativePathFrom ' + fromResource + ' vs ' + this);
-
-      var myPath = this.withRelativePartsResolved().path(),
-          otherPath = fromResource.withRelativePartsResolved().path();
-      if (myPath == otherPath) return '';
-      var relPath = checkPathes(myPath, otherPath);
-      if (!relPath) throw new Error('pathname differs in relativePathFrom ' + fromResource + ' vs ' + this);
-      return relPath;
-
-      // -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
-
-      function checkPathes(path1, path2) {
-        var paths1 = path1.split('/'),
-            paths2 = path2.split('/');
-        paths1.shift();
-        paths2.shift();
-        for (var i = 0; i < paths2.length; i++) {
-          if (!paths1[i] || paths1[i] != paths2[i]) break;
-        } // now that's some JavaScript FOO
-        var result = '../'.repeat(Math.max(0, paths2.length - i - 1)) + paths1.splice(i, paths1.length).join('/');
-        return result;
-      }
-    }
-  }, {
-    key: "join",
-    value: function join(path) {
-      return this.newResource(this.url.replace(slashEndRe, "") + "/" + path.replace(slashStartRe, ""));
+      return relativePathBetween(fromResource.url, this.url);
     }
   }, {
     key: "withPath",
     value: function withPath(path) {
       var root = this.isRoot() ? this : this.root();
       return root.join(path);
+    }
+  }, {
+    key: "join",
+    value: function join$1(path) {
+      return this.newResource(this.url.replace(slashEndRe, "") + "/" + path.replace(slashStartRe, ""));
     }
   }, {
     key: "isRoot",
@@ -1076,7 +1394,7 @@ var Resource$$1 = function () {
   }, {
     key: "ensureExistance",
     value: function () {
-      var _ref = asyncToGenerator(regeneratorRuntime.mark(function _callee(optionalContent) {
+      var _ref3 = asyncToGenerator(regeneratorRuntime.mark(function _callee(optionalContent) {
         return regeneratorRuntime.wrap(function _callee$(_context) {
           while (1) {
             switch (_context.prev = _context.next) {
@@ -1125,7 +1443,7 @@ var Resource$$1 = function () {
       }));
 
       function ensureExistance(_x3) {
-        return _ref.apply(this, arguments);
+        return _ref3.apply(this, arguments);
       }
 
       return ensureExistance;
@@ -1133,55 +1451,66 @@ var Resource$$1 = function () {
   }, {
     key: "copyTo",
     value: function () {
-      var _ref2 = asyncToGenerator(regeneratorRuntime.mark(function _callee2(otherResource) {
+      var _ref4 = asyncToGenerator(regeneratorRuntime.mark(function _callee2(otherResource) {
         var _this2 = this;
 
+        var ensureParent = arguments.length > 1 && arguments[1] !== undefined ? arguments[1] : true;
         var toFile, fromResources, toResources;
         return regeneratorRuntime.wrap(function _callee2$(_context2) {
           while (1) {
             switch (_context2.prev = _context2.next) {
               case 0:
                 if (!this.isFile()) {
-                  _context2.next = 10;
+                  _context2.next = 13;
                   break;
                 }
 
                 toFile = otherResource.isFile() ? otherResource : otherResource.join(this.name());
-                _context2.t0 = toFile;
+
+                if (!ensureParent) {
+                  _context2.next = 5;
+                  break;
+                }
+
                 _context2.next = 5;
-                return this.read();
+                return toFile.parent().ensureExistance();
 
               case 5:
-                _context2.t1 = _context2.sent;
+                _context2.t0 = toFile;
                 _context2.next = 8;
-                return _context2.t0.write.call(_context2.t0, _context2.t1);
+                return this.read();
 
               case 8:
-                _context2.next = 22;
+                _context2.t1 = _context2.sent;
+                _context2.next = 11;
+                return _context2.t0.write.call(_context2.t0, _context2.t1);
+
+              case 11:
+                _context2.next = 25;
                 break;
 
-              case 10:
+              case 13:
                 if (otherResource.isDirectory()) {
-                  _context2.next = 12;
+                  _context2.next = 15;
                   break;
                 }
 
                 throw new Error("Cannot copy a directory to a file!");
 
-              case 12:
-                _context2.next = 14;
+              case 15:
+                _context2.next = 17;
                 return this.dirList('infinity');
 
-              case 14:
+              case 17:
                 fromResources = _context2.sent;
                 toResources = fromResources.map(function (ea) {
                   return otherResource.join(ea.relativePathFrom(_this2));
                 });
-                _context2.next = 18;
+                _context2.next = 21;
                 return otherResource.ensureExistance();
 
-              case 18:
-                _context2.next = 20;
+              case 21:
+                _context2.next = 23;
                 return fromResources.reduceRight(function (next, ea, i) {
                   return function () {
                     return Promise.resolve(ea.isDirectory() && toResources[i].ensureExistance()).then(next);
@@ -1190,20 +1519,20 @@ var Resource$$1 = function () {
                   return Promise.resolve();
                 })();
 
-              case 20:
-                _context2.next = 22;
+              case 23:
+                _context2.next = 25;
                 return fromResources.reduceRight(function (next, ea, i) {
                   return function () {
-                    return Promise.resolve(ea.isFile() && ea.copyTo(toResources[i])).then(next);
+                    return Promise.resolve(ea.isFile() && ea.copyTo(toResources[i], false)).then(next);
                   };
                 }, function () {
                   return Promise.resolve();
                 })();
 
-              case 22:
+              case 25:
                 return _context2.abrupt("return", this);
 
-              case 23:
+              case 26:
               case "end":
                 return _context2.stop();
             }
@@ -1211,8 +1540,8 @@ var Resource$$1 = function () {
         }, _callee2, this);
       }));
 
-      function copyTo(_x4) {
-        return _ref2.apply(this, arguments);
+      function copyTo(_x4, _x5) {
+        return _ref4.apply(this, arguments);
       }
 
       return copyTo;
@@ -1220,7 +1549,7 @@ var Resource$$1 = function () {
   }, {
     key: "rename",
     value: function () {
-      var _ref3 = asyncToGenerator(regeneratorRuntime.mark(function _callee3(otherResource) {
+      var _ref5 = asyncToGenerator(regeneratorRuntime.mark(function _callee3(otherResource) {
         return regeneratorRuntime.wrap(function _callee3$(_context3) {
           while (1) {
             switch (_context3.prev = _context3.next) {
@@ -1240,8 +1569,8 @@ var Resource$$1 = function () {
         }, _callee3, this);
       }));
 
-      function rename$$1(_x5) {
-        return _ref3.apply(this, arguments);
+      function rename$$1(_x7) {
+        return _ref5.apply(this, arguments);
       }
 
       return rename$$1;
@@ -1260,7 +1589,7 @@ var Resource$$1 = function () {
   }, {
     key: "read",
     value: function () {
-      var _ref4 = asyncToGenerator(regeneratorRuntime.mark(function _callee4() {
+      var _ref6 = asyncToGenerator(regeneratorRuntime.mark(function _callee4() {
         return regeneratorRuntime.wrap(function _callee4$(_context4) {
           while (1) {
             switch (_context4.prev = _context4.next) {
@@ -1275,7 +1604,7 @@ var Resource$$1 = function () {
       }));
 
       function read() {
-        return _ref4.apply(this, arguments);
+        return _ref6.apply(this, arguments);
       }
 
       return read;
@@ -1283,7 +1612,7 @@ var Resource$$1 = function () {
   }, {
     key: "write",
     value: function () {
-      var _ref5 = asyncToGenerator(regeneratorRuntime.mark(function _callee5() {
+      var _ref7 = asyncToGenerator(regeneratorRuntime.mark(function _callee5() {
         return regeneratorRuntime.wrap(function _callee5$(_context5) {
           while (1) {
             switch (_context5.prev = _context5.next) {
@@ -1298,7 +1627,7 @@ var Resource$$1 = function () {
       }));
 
       function write() {
-        return _ref5.apply(this, arguments);
+        return _ref7.apply(this, arguments);
       }
 
       return write;
@@ -1306,7 +1635,7 @@ var Resource$$1 = function () {
   }, {
     key: "mkdir",
     value: function () {
-      var _ref6 = asyncToGenerator(regeneratorRuntime.mark(function _callee6() {
+      var _ref8 = asyncToGenerator(regeneratorRuntime.mark(function _callee6() {
         return regeneratorRuntime.wrap(function _callee6$(_context6) {
           while (1) {
             switch (_context6.prev = _context6.next) {
@@ -1321,7 +1650,7 @@ var Resource$$1 = function () {
       }));
 
       function mkdir() {
-        return _ref6.apply(this, arguments);
+        return _ref8.apply(this, arguments);
       }
 
       return mkdir;
@@ -1329,7 +1658,7 @@ var Resource$$1 = function () {
   }, {
     key: "exists",
     value: function () {
-      var _ref7 = asyncToGenerator(regeneratorRuntime.mark(function _callee7() {
+      var _ref9 = asyncToGenerator(regeneratorRuntime.mark(function _callee7() {
         return regeneratorRuntime.wrap(function _callee7$(_context7) {
           while (1) {
             switch (_context7.prev = _context7.next) {
@@ -1344,7 +1673,7 @@ var Resource$$1 = function () {
       }));
 
       function exists() {
-        return _ref7.apply(this, arguments);
+        return _ref9.apply(this, arguments);
       }
 
       return exists;
@@ -1352,7 +1681,7 @@ var Resource$$1 = function () {
   }, {
     key: "remove",
     value: function () {
-      var _ref8 = asyncToGenerator(regeneratorRuntime.mark(function _callee8() {
+      var _ref10 = asyncToGenerator(regeneratorRuntime.mark(function _callee8() {
         return regeneratorRuntime.wrap(function _callee8$(_context8) {
           while (1) {
             switch (_context8.prev = _context8.next) {
@@ -1367,7 +1696,7 @@ var Resource$$1 = function () {
       }));
 
       function remove() {
-        return _ref8.apply(this, arguments);
+        return _ref10.apply(this, arguments);
       }
 
       return remove;
@@ -1375,7 +1704,7 @@ var Resource$$1 = function () {
   }, {
     key: "dirList",
     value: function () {
-      var _ref9 = asyncToGenerator(regeneratorRuntime.mark(function _callee9(depth, opts) {
+      var _ref11 = asyncToGenerator(regeneratorRuntime.mark(function _callee9(depth, opts) {
         return regeneratorRuntime.wrap(function _callee9$(_context9) {
           while (1) {
             switch (_context9.prev = _context9.next) {
@@ -1389,8 +1718,8 @@ var Resource$$1 = function () {
         }, _callee9, this);
       }));
 
-      function dirList(_x6, _x7) {
-        return _ref9.apply(this, arguments);
+      function dirList(_x8, _x9) {
+        return _ref11.apply(this, arguments);
       }
 
       return dirList;
@@ -1398,7 +1727,7 @@ var Resource$$1 = function () {
   }, {
     key: "readProperties",
     value: function () {
-      var _ref10 = asyncToGenerator(regeneratorRuntime.mark(function _callee10(opts) {
+      var _ref12 = asyncToGenerator(regeneratorRuntime.mark(function _callee10(opts) {
         return regeneratorRuntime.wrap(function _callee10$(_context10) {
           while (1) {
             switch (_context10.prev = _context10.next) {
@@ -1412,8 +1741,8 @@ var Resource$$1 = function () {
         }, _callee10, this);
       }));
 
-      function readProperties(_x8) {
-        return _ref10.apply(this, arguments);
+      function readProperties(_x10) {
+        return _ref12.apply(this, arguments);
       }
 
       return readProperties;
@@ -1428,7 +1757,7 @@ var Resource$$1 = function () {
   }, {
     key: "readJson",
     value: function () {
-      var _ref11 = asyncToGenerator(regeneratorRuntime.mark(function _callee11(obj) {
+      var _ref13 = asyncToGenerator(regeneratorRuntime.mark(function _callee11(obj) {
         return regeneratorRuntime.wrap(function _callee11$(_context11) {
           while (1) {
             switch (_context11.prev = _context11.next) {
@@ -1449,8 +1778,8 @@ var Resource$$1 = function () {
         }, _callee11, this);
       }));
 
-      function readJson(_x10) {
-        return _ref11.apply(this, arguments);
+      function readJson(_x12) {
+        return _ref13.apply(this, arguments);
       }
 
       return readJson;
@@ -1463,50 +1792,23 @@ var Resource$$1 = function () {
   }, {
     key: "__serialize__",
     value: function __serialize__() {
-      return { __expr__: "resource(\"" + this.url + "\")", bindings: { "lively.resources": ["resource"] } };
+      return { __expr__: "var r = null; try { r = resource(\"" + this.url + "\");} catch (err) {}; r", bindings: { "lively.resources": ["resource"] } };
     }
   }, {
     key: "isResource",
     get: function get() {
       return true;
     }
+  }, {
+    key: "canDealWithJSON",
+    get: function get() {
+      return false;
+    }
   }]);
   return Resource$$1;
 }();
 
-function applyExclude(exclude, resources) {
-  if (Array.isArray(exclude)) return exclude.reduce(function (intersect, exclude) {
-    return applyExclude(exclude, intersect);
-  }, resources);
-  if (typeof exclude === "string") return resources.filter(function (ea) {
-    return ea.path() !== exclude && ea.name() !== exclude;
-  });
-  if (exclude instanceof RegExp) return resources.filter(function (ea) {
-    return !exclude.test(ea.path()) && !exclude.test(ea.name());
-  });
-  if (typeof exclude === "function") return resources.filter(function (ea) {
-    return !exclude(ea);
-  });
-  return resources;
-}
-
-/*
-
-applyExclude(["foo", "foo"], [
-  {path: () => "foo", name: () => "foo"},
-  {path: () => "bar", name: () => "bar"},
-  {path: () => "baz", name: () => "baz"}
-])
-
-applyExclude(["bar", "foo"], [
-  {path: () => "foo", name: () => "foo"},
-  {path: () => "bar", name: () => "bar"},
-  {path: () => "baz", name: () => "baz"}
-])
-
-*/
-
-/*global fetch, DOMParser, XPathEvaluator, XPathResult, Namespace*/
+/*global fetch, DOMParser, XPathEvaluator, XPathResult, Namespace,System,global,process*/
 
 var XPathQuery = function () {
   function XPathQuery(expression) {
@@ -1626,6 +1928,16 @@ function readXMLPropfindResult(xmlString) {
   });
 }
 
+// -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
+
+// MIT License Copyright (c) Sindre Sorhus <sindresorhus@gmail.com>
+// https://github.com/sindresorhus/binary-extensions
+var binaryExtensions = ["3ds", "3g2", "3gp", "7z", "a", "aac", "adp", "ai", "aif", "aiff", "alz", "ape", "apk", "ar", "arj", "asf", "au", "avi", "bak", "bh", "bin", "bk", "bmp", "btif", "bz2", "bzip2", "cab", "caf", "cgm", "class", "cmx", "cpio", "cr2", "csv", "cur", "dat", "deb", "dex", "djvu", "dll", "dmg", "dng", "doc", "docm", "docx", "dot", "dotm", "dra", "DS_Store", "dsk", "dts", "dtshd", "dvb", "dwg", "dxf", "ecelp4800", "ecelp7470", "ecelp9600", "egg", "eol", "eot", "epub", "exe", "f4v", "fbs", "fh", "fla", "flac", "fli", "flv", "fpx", "fst", "fvt", "g3", "gif", "graffle", "gz", "gzip", "h261", "h263", "h264", "icns", "ico", "ief", "img", "ipa", "iso", "jar", "jpeg", "jpg", "jpgv", "jpm", "jxr", "key", "ktx", "lha", "lvp", "lz", "lzh", "lzma", "lzo", "m3u", "m4a", "m4v", "mar", "mdi", "mht", "mid", "midi", "mj2", "mka", "mkv", "mmr", "mng", "mobi", "mov", "movie", "mp3", "mp4", "mp4a", "mpeg", "mpg", "mpga", "mxu", "nef", "npx", "numbers", "o", "oga", "ogg", "ogv", "otf", "pages", "pbm", "pcx", "pdf", "pea", "pgm", "pic", "png", "pnm", "pot", "potm", "potx", "ppa", "ppam", "ppm", "pps", "ppsm", "ppsx", "ppt", "pptm", "pptx", "psd", "pya", "pyc", "pyo", "pyv", "qt", "rar", "ras", "raw", "rgb", "rip", "rlc", "rmf", "rmvb", "rtf", "rz", "s3m", "s7z", "scpt", "sgi", "shar", "sil", "sketch", "slk", "smv", "so", "sub", "swf", "tar", "tbz", "tbz2", "tga", "tgz", "thmx", "tif", "tiff", "tlz", "ttc", "ttf", "txz", "udf", "uvh", "uvi", "uvm", "uvp", "uvs", "uvu", "viv", "vob", "war", "wav", "wax", "wbmp", "wdp", "weba", "webm", "webp", "whl", "wim", "wm", "wma", "wmv", "wmx", "woff", "woff2", "wvx", "xbm", "xif", "xla", "xlam", "xls", "xlsb", "xlsm", "xlsx", "xlt", "xltm", "xltx", "xm", "xmind", "xpi", "xpm", "xwd", "xz", "z", "zip", "zipx"];
+
+// -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
+
+var isNode = typeof System !== "undefined" ? System.get("@system-env").node : typeof global !== "undefined" && typeof process !== "undefined";
+
 function defaultOrigin() {
   // FIXME nodejs usage???
   return document.location.origin;
@@ -1635,14 +1947,13 @@ function makeRequest(resource) {
   var method = arguments.length > 1 && arguments[1] !== undefined ? arguments[1] : "GET";
   var body = arguments[2];
   var headers = arguments.length > 3 && arguments[3] !== undefined ? arguments[3] : {};
-  var url = resource.url,
-      useCors = resource.useCors,
-      useProxy = resource.useProxy,
-      moreHeaders = resource.headers,
-      useCors = typeof useCors !== "undefined" ? useCors : true,
-      useProxy = typeof useProxy !== "undefined" ? useProxy : true,
-      fetchOpts = { method: method };
-
+  var url = resource.url;
+  var useCors = resource.useCors;
+  var useProxy = resource.useProxy;
+  var moreHeaders = resource.headers;
+  var useCors = typeof useCors !== "undefined" ? useCors : true;
+  var useProxy = typeof useProxy !== "undefined" ? useProxy : true;
+  var fetchOpts = { method: method };
 
   if (useProxy) {
     Object.assign(headers, {
@@ -1651,13 +1962,14 @@ function makeRequest(resource) {
       "x-lively-proxy-request": url
     });
 
-    url = defaultOrigin();
+    url = resource.proxyDomain || defaultOrigin();
   }
 
   if (useCors) fetchOpts.mode = "cors";
   if (body) fetchOpts.body = body;
   fetchOpts.redirect = 'follow';
   fetchOpts.headers = _extends({}, headers, moreHeaders);
+
   return fetch(url, fetchOpts);
 }
 
@@ -1671,20 +1983,29 @@ var WebDAVResource = function (_Resource) {
     var _this = possibleConstructorReturn(this, (WebDAVResource.__proto__ || Object.getPrototypeOf(WebDAVResource)).call(this, url, opts));
 
     _this.useProxy = opts.hasOwnProperty("useProxy") ? opts.useProxy : false;
+    _this.proxyDomain = opts.proxyDomain || undefined;
     _this.useCors = opts.hasOwnProperty("useCors") ? opts.useCors : false;
     _this.headers = opts.headers || {};
+    _this.binary = _this.isFile() ? binaryExtensions.includes(_this.ext()) : false;
+    _this.errorOnHTTPStatusCodes = opts.hasOwnProperty("errorOnHTTPStatusCodes") ? opts.errorOnHTTPStatusCodes : true;
     return _this;
   }
 
   createClass(WebDAVResource, [{
     key: "join",
     value: function join(path) {
-      return Object.assign(get$1(WebDAVResource.prototype.__proto__ || Object.getPrototypeOf(WebDAVResource.prototype), "join", this).call(this, path), { headers: this.headers, useCors: this.useCors, useProxy: this.useProxy });
+      return Object.assign(get$1(WebDAVResource.prototype.__proto__ || Object.getPrototypeOf(WebDAVResource.prototype), "join", this).call(this, path), { headers: this.headers, useCors: this.useCors, useProxy: this.useProxy, proxyDomain: this.proxyDomain });
     }
   }, {
     key: "makeProxied",
-    value: function makeProxied() {
-      return this.useProxy ? this : new this.constructor(this.url, { headers: this.headers, useCors: this.useCors, useProxy: true });
+    value: function makeProxied(proxyDomain) {
+      if (proxyDomain !== undefined) this.proxyDomain = proxyDomain;
+      return this.useProxy ? this : new this.constructor(this.url, { headers: this.headers, useCors: this.useCors, useProxy: true, proxyDomain: this.proxyDomain });
+    }
+  }, {
+    key: "noErrorOnHTTPStatusCodes",
+    value: function noErrorOnHTTPStatusCodes() {
+      this.errorOnHTTPStatusCodes = false;return this;
     }
   }, {
     key: "read",
@@ -1701,7 +2022,7 @@ var WebDAVResource = function (_Resource) {
               case 2:
                 res = _context.sent;
 
-                if (res.ok) {
+                if (!(!res.ok && this.errorOnHTTPStatusCodes)) {
                   _context.next = 5;
                   break;
                 }
@@ -1780,7 +2101,7 @@ var WebDAVResource = function (_Resource) {
               case 4:
                 res = _context2.sent;
 
-                if (res.ok) {
+                if (!(!res.ok && this.errorOnHTTPStatusCodes)) {
                   _context2.next = 7;
                   break;
                 }
@@ -1827,7 +2148,7 @@ var WebDAVResource = function (_Resource) {
               case 4:
                 res = _context3.sent;
 
-                if (res.ok) {
+                if (!(!res.ok && this.errorOnHTTPStatusCodes)) {
                   _context3.next = 7;
                   break;
                 }
@@ -1938,7 +2259,7 @@ var WebDAVResource = function (_Resource) {
               case 2:
                 res = _context6.sent;
 
-                if (res.ok) {
+                if (!(!res.ok && this.errorOnHTTPStatusCodes)) {
                   _context6.next = 5;
                   break;
                 }
@@ -1973,16 +2294,20 @@ var WebDAVResource = function (_Resource) {
   }, {
     key: "dirList",
     value: function () {
-      var _ref7 = asyncToGenerator(regeneratorRuntime.mark(function _callee7() {
+      var _ref7 = asyncToGenerator(regeneratorRuntime.mark(function _callee8() {
+        var _this2 = this;
+
         var depth = arguments.length > 0 && arguments[0] !== undefined ? arguments[0] : 1;
         var opts = arguments.length > 1 && arguments[1] !== undefined ? arguments[1] : {};
-        var exclude, resources, self, subResources, subCollections;
-        return regeneratorRuntime.wrap(function _callee7$(_context7) {
+
+        var exclude, resources, self, _ret;
+
+        return regeneratorRuntime.wrap(function _callee8$(_context8) {
           while (1) {
-            switch (_context7.prev = _context7.next) {
+            switch (_context8.prev = _context8.next) {
               case 0:
                 if (!(typeof depth !== "number" && depth !== 'infinity')) {
-                  _context7.next = 2;
+                  _context8.next = 2;
                   break;
                 }
 
@@ -1995,46 +2320,72 @@ var WebDAVResource = function (_Resource) {
                 if (depth <= 0) depth = 1;
 
                 if (!(depth === 1)) {
-                  _context7.next = 13;
+                  _context8.next = 13;
                   break;
                 }
 
-                _context7.next = 7;
+                _context8.next = 7;
                 return this._propfind();
 
               case 7:
-                resources = _context7.sent;
+                resources = _context8.sent;
                 self = resources.shift();
 
                 if (exclude) resources = applyExclude(exclude, resources);
-                return _context7.abrupt("return", resources);
+                return _context8.abrupt("return", resources);
 
               case 13:
-                _context7.next = 15;
-                return this.dirList(1, opts);
+                return _context8.delegateYield(regeneratorRuntime.mark(function _callee7() {
+                  var subResources, subCollections;
+                  return regeneratorRuntime.wrap(function _callee7$(_context7) {
+                    while (1) {
+                      switch (_context7.prev = _context7.next) {
+                        case 0:
+                          _context7.next = 2;
+                          return _this2.dirList(1, opts);
 
-              case 15:
-                subResources = _context7.sent;
-                subCollections = subResources.filter(function (ea) {
-                  return ea.isDirectory();
-                });
-                return _context7.abrupt("return", Promise.all(subCollections.map(function (col) {
-                  return col.dirList(typeof depth === "number" ? depth - 1 : depth, opts);
-                })).then(function (recursiveResult) {
-                  return recursiveResult.reduce(function (all, ea) {
-                    return all.concat(ea);
-                  }, subResources);
-                }));
+                        case 2:
+                          subResources = _context7.sent;
+                          subCollections = subResources.filter(function (ea) {
+                            return ea.isDirectory();
+                          });
+                          return _context7.abrupt("return", {
+                            v: Promise.all(subCollections.map(function (col) {
+                              return col.dirList(typeof depth === "number" ? depth - 1 : depth, opts);
+                            })).then(function (recursiveResult) {
+                              return recursiveResult.reduce(function (all, ea) {
+                                return all.concat(ea);
+                              }, subResources);
+                            })
+                          });
 
-              case 18:
+                        case 5:
+                        case "end":
+                          return _context7.stop();
+                      }
+                    }
+                  }, _callee7, _this2);
+                })(), "t0", 14);
+
+              case 14:
+                _ret = _context8.t0;
+
+                if (!((typeof _ret === "undefined" ? "undefined" : _typeof(_ret)) === "object")) {
+                  _context8.next = 17;
+                  break;
+                }
+
+                return _context8.abrupt("return", _ret.v);
+
+              case 17:
               case "end":
-                return _context7.stop();
+                return _context8.stop();
             }
           }
-        }, _callee7, this);
+        }, _callee8, this);
       }));
 
-      function dirList() {
+      function dirList(_x6, _x7) {
         return _ref7.apply(this, arguments);
       }
 
@@ -2043,33 +2394,336 @@ var WebDAVResource = function (_Resource) {
   }, {
     key: "readProperties",
     value: function () {
-      var _ref8 = asyncToGenerator(regeneratorRuntime.mark(function _callee8(opts) {
+      var _ref8 = asyncToGenerator(regeneratorRuntime.mark(function _callee9(opts) {
         var props;
-        return regeneratorRuntime.wrap(function _callee8$(_context8) {
+        return regeneratorRuntime.wrap(function _callee9$(_context9) {
           while (1) {
-            switch (_context8.prev = _context8.next) {
+            switch (_context9.prev = _context9.next) {
               case 0:
-                _context8.next = 2;
+                _context9.next = 2;
                 return this._propfind();
 
               case 2:
-                props = _context8.sent[0];
-                return _context8.abrupt("return", this.assignProperties(props));
+                props = _context9.sent[0];
+                return _context9.abrupt("return", this.assignProperties(props));
 
               case 4:
               case "end":
-                return _context8.stop();
+                return _context9.stop();
             }
           }
-        }, _callee8, this);
+        }, _callee9, this);
       }));
 
-      function readProperties(_x8) {
+      function readProperties(_x10) {
         return _ref8.apply(this, arguments);
       }
 
       return readProperties;
     }()
+  }, {
+    key: "post",
+    value: function () {
+      var _ref9 = asyncToGenerator(regeneratorRuntime.mark(function _callee10() {
+        var body = arguments.length > 0 && arguments[0] !== undefined ? arguments[0] : null;
+        var res, text, json;
+        return regeneratorRuntime.wrap(function _callee10$(_context10) {
+          while (1) {
+            switch (_context10.prev = _context10.next) {
+              case 0:
+                if (typeof body !== "string") body = JSON.stringify(body);
+                _context10.next = 3;
+                return makeRequest(this, "POST", body, {});
+
+              case 3:
+                res = _context10.sent;
+                text = void 0;
+                json = void 0;
+                _context10.prev = 6;
+                _context10.next = 9;
+                return res.text();
+
+              case 9:
+                text = _context10.sent;
+                _context10.next = 14;
+                break;
+
+              case 12:
+                _context10.prev = 12;
+                _context10.t0 = _context10["catch"](6);
+
+              case 14:
+                if (text && res.headers.get("content-type") === "application/json") {
+                  try {
+                    json = JSON.parse(text);
+                  } catch (err) {}
+                }
+
+                if (!(!res.ok && this.errorOnHTTPStatusCodes)) {
+                  _context10.next = 19;
+                  break;
+                }
+
+                throw new Error("Error in POST " + this.url + ": " + (text || res.statusText));
+
+              case 19:
+                return _context10.abrupt("return", json || text);
+
+              case 20:
+              case "end":
+                return _context10.stop();
+            }
+          }
+        }, _callee10, this, [[6, 12]]);
+      }));
+
+      function post(_x11) {
+        return _ref9.apply(this, arguments);
+      }
+
+      return post;
+    }()
+  }, {
+    key: "copyTo",
+    value: function () {
+      var _ref10 = asyncToGenerator(regeneratorRuntime.mark(function _callee11(otherResource) {
+        var ensureParent = arguments.length > 1 && arguments[1] !== undefined ? arguments[1] : true;
+        var toFile;
+        return regeneratorRuntime.wrap(function _callee11$(_context11) {
+          while (1) {
+            switch (_context11.prev = _context11.next) {
+              case 0:
+                if (!this.isFile()) {
+                  _context11.next = 7;
+                  break;
+                }
+
+                toFile = otherResource.isFile() ? otherResource : otherResource.join(this.name());
+                // optimized copy, using pipes, for HTTP
+
+                if (!isNode) {
+                  _context11.next = 7;
+                  break;
+                }
+
+                if (!toFile.isHTTPResource) {
+                  _context11.next = 5;
+                  break;
+                }
+
+                return _context11.abrupt("return", this._copyTo_file_nodejs_http(toFile, ensureParent));
+
+              case 5:
+                if (!toFile.isNodeJSFileResource) {
+                  _context11.next = 7;
+                  break;
+                }
+
+                return _context11.abrupt("return", this._copyTo_file_nodejs_fs(toFile, ensureParent));
+
+              case 7:
+                return _context11.abrupt("return", get$1(WebDAVResource.prototype.__proto__ || Object.getPrototypeOf(WebDAVResource.prototype), "copyTo", this).call(this, otherResource, ensureParent));
+
+              case 8:
+              case "end":
+                return _context11.stop();
+            }
+          }
+        }, _callee11, this);
+      }));
+
+      function copyTo(_x13, _x14) {
+        return _ref10.apply(this, arguments);
+      }
+
+      return copyTo;
+    }()
+  }, {
+    key: "_copyFrom_file_nodejs_fs",
+    value: function () {
+      var _ref11 = asyncToGenerator(regeneratorRuntime.mark(function _callee12(fromFile) {
+        var ensureParent = arguments.length > 1 && arguments[1] !== undefined ? arguments[1] : true;
+        var error, stream, toRes;
+        return regeneratorRuntime.wrap(function _callee12$(_context12) {
+          while (1) {
+            switch (_context12.prev = _context12.next) {
+              case 0:
+                if (!ensureParent) {
+                  _context12.next = 3;
+                  break;
+                }
+
+                _context12.next = 3;
+                return this.parent().ensureExistance();
+
+              case 3:
+                error = void 0;
+                stream = fromFile._createReadStream();
+
+                stream.on("error", function (err) {
+                  return error = err;
+                });
+                _context12.next = 8;
+                return makeRequest(this, "PUT", stream);
+
+              case 8:
+                toRes = _context12.sent;
+
+                if (!error) {
+                  _context12.next = 11;
+                  break;
+                }
+
+                throw error;
+
+              case 11:
+                if (!(!toRes.ok && this.errorOnHTTPStatusCodes)) {
+                  _context12.next = 13;
+                  break;
+                }
+
+                throw new Error("copyTo: Cannot GET: " + toRes.statusText + " " + toRes.status);
+
+              case 13:
+                return _context12.abrupt("return", this);
+
+              case 14:
+              case "end":
+                return _context12.stop();
+            }
+          }
+        }, _callee12, this);
+      }));
+
+      function _copyFrom_file_nodejs_fs(_x16, _x17) {
+        return _ref11.apply(this, arguments);
+      }
+
+      return _copyFrom_file_nodejs_fs;
+    }()
+  }, {
+    key: "_copyTo_file_nodejs_fs",
+    value: function () {
+      var _ref12 = asyncToGenerator(regeneratorRuntime.mark(function _callee13(toFile) {
+        var _this3 = this;
+
+        var ensureParent = arguments.length > 1 && arguments[1] !== undefined ? arguments[1] : true;
+        var fromRes, error;
+        return regeneratorRuntime.wrap(function _callee13$(_context13) {
+          while (1) {
+            switch (_context13.prev = _context13.next) {
+              case 0:
+                if (!ensureParent) {
+                  _context13.next = 3;
+                  break;
+                }
+
+                _context13.next = 3;
+                return toFile.parent().ensureExistance();
+
+              case 3:
+                _context13.next = 5;
+                return makeRequest(this, "GET");
+
+              case 5:
+                fromRes = _context13.sent;
+
+                if (!(!fromRes.ok && this.errorOnHTTPStatusCodes)) {
+                  _context13.next = 8;
+                  break;
+                }
+
+                throw new Error("copyTo: Cannot GET: " + fromRes.statusText + " " + fromRes.status);
+
+              case 8:
+                error = void 0;
+                return _context13.abrupt("return", new Promise(function (resolve, reject) {
+                  return fromRes.body.pipe(toFile._createWriteStream()).on("error", function (err) {
+                    return error = err;
+                  }).on("finish", function () {
+                    return error ? reject(error) : resolve(_this3);
+                  });
+                }));
+
+              case 10:
+              case "end":
+                return _context13.stop();
+            }
+          }
+        }, _callee13, this);
+      }));
+
+      function _copyTo_file_nodejs_fs(_x19, _x20) {
+        return _ref12.apply(this, arguments);
+      }
+
+      return _copyTo_file_nodejs_fs;
+    }()
+  }, {
+    key: "_copyTo_file_nodejs_http",
+    value: function () {
+      var _ref13 = asyncToGenerator(regeneratorRuntime.mark(function _callee14(toFile) {
+        var ensureParent = arguments.length > 1 && arguments[1] !== undefined ? arguments[1] : true;
+        var fromRes, toRes;
+        return regeneratorRuntime.wrap(function _callee14$(_context14) {
+          while (1) {
+            switch (_context14.prev = _context14.next) {
+              case 0:
+                if (!ensureParent) {
+                  _context14.next = 3;
+                  break;
+                }
+
+                _context14.next = 3;
+                return toFile.parent().ensureExistance();
+
+              case 3:
+                _context14.next = 5;
+                return makeRequest(this, "GET");
+
+              case 5:
+                fromRes = _context14.sent;
+
+                if (!(!fromRes.ok && this.errorOnHTTPStatusCodes)) {
+                  _context14.next = 8;
+                  break;
+                }
+
+                throw new Error("copyTo: Cannot GET: " + fromRes.statusText + " " + fromRes.status);
+
+              case 8:
+                _context14.next = 10;
+                return makeRequest(toFile, "PUT", fromRes.body);
+
+              case 10:
+                toRes = _context14.sent;
+
+                if (!(!fromRes.ok && this.errorOnHTTPStatusCodes)) {
+                  _context14.next = 13;
+                  break;
+                }
+
+                throw new Error("copyTo: Cannot PUT: " + toRes.statusText + " " + toRes.status);
+
+              case 13:
+              case "end":
+                return _context14.stop();
+            }
+          }
+        }, _callee14, this);
+      }));
+
+      function _copyTo_file_nodejs_http(_x22, _x23) {
+        return _ref13.apply(this, arguments);
+      }
+
+      return _copyTo_file_nodejs_http;
+    }()
+  }, {
+    key: "isHTTPResource",
+    get: function get() {
+      return true;
+    }
   }]);
   return WebDAVResource;
 }(Resource$$1);
@@ -2153,13 +2807,15 @@ var NodeJSFileResource = function (_Resource) {
     key: "read",
     value: function () {
       var _ref2 = asyncToGenerator(regeneratorRuntime.mark(function _callee2() {
+        var readP;
         return regeneratorRuntime.wrap(function _callee2$(_context2) {
           while (1) {
             switch (_context2.prev = _context2.next) {
               case 0:
-                return _context2.abrupt("return", readFileP(this.path()).then(String));
+                readP = readFileP(this.path());
+                return _context2.abrupt("return", this.binary ? readP : readP.then(String));
 
-              case 1:
+              case 2:
               case "end":
                 return _context2.stop();
             }
@@ -2398,7 +3054,7 @@ var NodeJSFileResource = function (_Resource) {
         }, _callee6, this, [[9, 28, 32, 40], [33,, 35, 39]]);
       }));
 
-      function dirList() {
+      function dirList(_x3, _x4) {
         return _ref6.apply(this, arguments);
       }
 
@@ -2656,7 +3312,7 @@ var NodeJSFileResource = function (_Resource) {
         }, _callee8, this, [[14, 27, 31, 39], [32,, 34, 38], [42, 53, 57, 65], [58,, 60, 64], [68, 79, 83, 91], [84,, 86, 90]]);
       }));
 
-      function rename$$1(_x5) {
+      function rename$$1(_x7) {
         return _ref8.apply(this, arguments);
       }
 
@@ -2803,11 +3459,53 @@ var NodeJSFileResource = function (_Resource) {
         }, _callee10, this);
       }));
 
-      function readProperties(_x6) {
+      function readProperties(_x8) {
         return _ref10.apply(this, arguments);
       }
 
       return readProperties;
+    }()
+  }, {
+    key: "copyTo",
+    value: function () {
+      var _ref11 = asyncToGenerator(regeneratorRuntime.mark(function _callee11(otherResource) {
+        var ensureParent = arguments.length > 1 && arguments[1] !== undefined ? arguments[1] : true;
+        var toFile;
+        return regeneratorRuntime.wrap(function _callee11$(_context11) {
+          while (1) {
+            switch (_context11.prev = _context11.next) {
+              case 0:
+                if (!this.isFile()) {
+                  _context11.next = 4;
+                  break;
+                }
+
+                toFile = otherResource.isFile() ? otherResource : otherResource.join(this.name());
+                // optimized copy, using pipes, for HTTP
+
+                if (!toFile.isHTTPResource) {
+                  _context11.next = 4;
+                  break;
+                }
+
+                return _context11.abrupt("return", toFile._copyFrom_file_nodejs_fs(this, ensureParent = true));
+
+              case 4:
+                return _context11.abrupt("return", get$1(NodeJSFileResource.prototype.__proto__ || Object.getPrototypeOf(NodeJSFileResource.prototype), "copyTo", this).call(this, otherResource, ensureParent));
+
+              case 5:
+              case "end":
+                return _context11.stop();
+            }
+          }
+        }, _callee11, this);
+      }));
+
+      function copyTo(_x9, _x10) {
+        return _ref11.apply(this, arguments);
+      }
+
+      return copyTo;
     }()
   }, {
     key: "_assignPropsFromStat",
@@ -2819,6 +3517,21 @@ var NodeJSFileResource = function (_Resource) {
         type: stat.isDirectory() ? "directory" : "file",
         isLink: stat.isSymbolicLink()
       });
+    }
+  }, {
+    key: "_createWriteStream",
+    value: function _createWriteStream() {
+      return fs.createWriteStream(this.path());
+    }
+  }, {
+    key: "_createReadStream",
+    value: function _createReadStream() {
+      return fs.createReadStream(this.path());
+    }
+  }, {
+    key: "isNodeJSFileResource",
+    get: function get() {
+      return true;
     }
   }]);
   return NodeJSFileResource;
@@ -3021,11 +3734,10 @@ var LocalResource = function (_Resource) {
       debug && console.log("[" + this + "] dirList");
       if (!this.isDirectory()) return this.asDirectory().dirList(depth, opts);
 
-      var exclude = opts.exclude,
-          prefix = this.path(),
-          children = [],
-          paths = Object.keys(this.localBackend.filespec);
-
+      var exclude = opts.exclude;
+      var prefix = this.path();
+      var children = [];
+      var paths = Object.keys(this.localBackend.filespec);
 
       if (depth === "infinity") depth = Infinity;
 
@@ -3068,7 +3780,7 @@ var resourceExtension$2 = {
   resourceClass: LocalResource
 };
 
-/*global System*/
+/*global System,babel*/
 var extensions = extensions || []; // [{name, matches, resourceClass}]
 
 registerExtension(resourceExtension$2);
@@ -3156,6 +3868,159 @@ var createFiles = function () {
   };
 }();
 
+var createFileSpec = function () {
+  var _ref2 = asyncToGenerator(regeneratorRuntime.mark(function _callee2(baseDir) {
+    var depth = arguments.length > 1 && arguments[1] !== undefined ? arguments[1] : "infinity";
+    var opts = arguments[2];
+
+    var files, spec, _iteratorNormalCompletion, _didIteratorError, _iteratorError, _iterator, _step, file, content, path, parentDir, _iteratorNormalCompletion2, _didIteratorError2, _iteratorError2, _iterator2, _step2, pathPart;
+
+    return regeneratorRuntime.wrap(function _callee2$(_context2) {
+      while (1) {
+        switch (_context2.prev = _context2.next) {
+          case 0:
+            _context2.next = 2;
+            return baseDir.dirList(depth, opts);
+
+          case 2:
+            files = _context2.sent;
+            spec = {};
+            _iteratorNormalCompletion = true;
+            _didIteratorError = false;
+            _iteratorError = undefined;
+            _context2.prev = 7;
+            _iterator = files[Symbol.iterator]();
+
+          case 9:
+            if (_iteratorNormalCompletion = (_step = _iterator.next()).done) {
+              _context2.next = 44;
+              break;
+            }
+
+            file = _step.value;
+
+            if (!file.isDirectory()) {
+              _context2.next = 15;
+              break;
+            }
+
+            _context2.t0 = {};
+            _context2.next = 18;
+            break;
+
+          case 15:
+            _context2.next = 17;
+            return file.read();
+
+          case 17:
+            _context2.t0 = _context2.sent;
+
+          case 18:
+            content = _context2.t0;
+            path = file.asFile().relativePathFrom(baseDir).split("/");
+            parentDir = spec;
+            _iteratorNormalCompletion2 = true;
+            _didIteratorError2 = false;
+            _iteratorError2 = undefined;
+            _context2.prev = 24;
+
+            for (_iterator2 = path.slice(0, -1)[Symbol.iterator](); !(_iteratorNormalCompletion2 = (_step2 = _iterator2.next()).done); _iteratorNormalCompletion2 = true) {
+              pathPart = _step2.value;
+
+              if (!parentDir[pathPart]) parentDir[pathPart] = {};
+              parentDir = parentDir[pathPart];
+            }
+            _context2.next = 32;
+            break;
+
+          case 28:
+            _context2.prev = 28;
+            _context2.t1 = _context2["catch"](24);
+            _didIteratorError2 = true;
+            _iteratorError2 = _context2.t1;
+
+          case 32:
+            _context2.prev = 32;
+            _context2.prev = 33;
+
+            if (!_iteratorNormalCompletion2 && _iterator2.return) {
+              _iterator2.return();
+            }
+
+          case 35:
+            _context2.prev = 35;
+
+            if (!_didIteratorError2) {
+              _context2.next = 38;
+              break;
+            }
+
+            throw _iteratorError2;
+
+          case 38:
+            return _context2.finish(35);
+
+          case 39:
+            return _context2.finish(32);
+
+          case 40:
+            parentDir[path[path.length - 1]] = content;
+
+          case 41:
+            _iteratorNormalCompletion = true;
+            _context2.next = 9;
+            break;
+
+          case 44:
+            _context2.next = 50;
+            break;
+
+          case 46:
+            _context2.prev = 46;
+            _context2.t2 = _context2["catch"](7);
+            _didIteratorError = true;
+            _iteratorError = _context2.t2;
+
+          case 50:
+            _context2.prev = 50;
+            _context2.prev = 51;
+
+            if (!_iteratorNormalCompletion && _iterator.return) {
+              _iterator.return();
+            }
+
+          case 53:
+            _context2.prev = 53;
+
+            if (!_didIteratorError) {
+              _context2.next = 56;
+              break;
+            }
+
+            throw _iteratorError;
+
+          case 56:
+            return _context2.finish(53);
+
+          case 57:
+            return _context2.finish(50);
+
+          case 58:
+            return _context2.abrupt("return", spec);
+
+          case 59:
+          case "end":
+            return _context2.stop();
+        }
+      }
+    }, _callee2, this, [[7, 46, 50, 58], [24, 28, 32, 40], [33,, 35, 39], [51,, 53, 57]]);
+  }));
+
+  return function createFileSpec(_x4, _x5, _x6) {
+    return _ref2.apply(this, arguments);
+  };
+}();
+
 function loadViaScript(url, onLoadCb) {
   // load JS code by inserting a <script src="..." /> tag into the
   // DOM. This allows cross domain script loading and JSONP
@@ -3187,57 +4052,68 @@ function loadViaScript(url, onLoadCb) {
 }
 
 var ensureFetch = function () {
-  var _ref2 = asyncToGenerator(regeneratorRuntime.mark(function _callee2() {
+  var _ref3 = asyncToGenerator(regeneratorRuntime.mark(function _callee3() {
     var thisModuleId, fetchInterface, moduleId;
-    return regeneratorRuntime.wrap(function _callee2$(_context2) {
+    return regeneratorRuntime.wrap(function _callee3$(_context3) {
       while (1) {
-        switch (_context2.prev = _context2.next) {
+        switch (_context3.prev = _context3.next) {
           case 0:
-            if (!("fetch" in System.global)) {
-              _context2.next = 2;
+            if (!("fetch" in System.global && "Headers" in System.global)) {
+              _context3.next = 2;
               break;
             }
 
-            return _context2.abrupt("return", Promise.resolve());
+            return _context3.abrupt("return", Promise.resolve());
 
           case 2:
             thisModuleId = System.decanonicalize("lively.resources");
 
             if (!System.get("@system-env").node) {
-              _context2.next = 10;
+              _context3.next = 16;
               break;
             }
 
-            _context2.next = 6;
-            return System.normalize("fetch-ponyfill", thisModuleId);
+            _context3.prev = 4;
 
-          case 6:
-            moduleId = _context2.sent.replace("file://", "");
-
-            fetchInterface = System._nodeRequire(moduleId);
-            _context2.next = 13;
+            fetchInterface = System._nodeRequire("fetch-ponyfill");
+            _context3.next = 14;
             break;
 
-          case 10:
-            _context2.next = 12;
-            return System.import("fetch-ponyfill", thisModuleId);
+          case 8:
+            _context3.prev = 8;
+            _context3.t0 = _context3["catch"](4);
+            _context3.next = 12;
+            return System.normalize("fetch-ponyfill", thisModuleId);
 
           case 12:
-            fetchInterface = _context2.sent;
+            moduleId = _context3.sent.replace("file://", "");
 
-          case 13:
-            Object.assign(System.global, fetchInterface());
+            fetchInterface = System._nodeRequire(moduleId);
 
           case 14:
+            _context3.next = 19;
+            break;
+
+          case 16:
+            _context3.next = 18;
+            return System.import("fetch-ponyfill", thisModuleId);
+
+          case 18:
+            fetchInterface = _context3.sent;
+
+          case 19:
+            Object.assign(System.global, fetchInterface());
+
+          case 20:
           case "end":
-            return _context2.stop();
+            return _context3.stop();
         }
       }
-    }, _callee2, this);
+    }, _callee3, this, [[4, 8]]);
   }));
 
   return function ensureFetch() {
-    return _ref2.apply(this, arguments);
+    return _ref3.apply(this, arguments);
   };
 }();
 
@@ -3263,11 +4139,13 @@ function unregisterExtension(extension) {
 
 exports.resource = resource;
 exports.createFiles = createFiles;
+exports.createFileSpec = createFileSpec;
 exports.loadViaScript = loadViaScript;
 exports.ensureFetch = ensureFetch;
 exports.registerExtension = registerExtension;
 exports.unregisterExtension = unregisterExtension;
 exports.Resource = Resource$$1;
+exports.parseQuery = parseQuery;
 
 }((this.lively.resources = this.lively.resources || {}),typeof module !== 'undefined' && typeof module.require === 'function' ? module.require('fs') : {readFile: function() { throw new Error('fs module not available'); }}));
 

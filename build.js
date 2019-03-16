@@ -195,9 +195,8 @@ class BuildProcess {
         npm_lifecycle_script: scripts[scriptName].split(" ")[0],
         PATH: pathParts.join(":")
       });
-
     try {
-      return await x(`/bin/sh -c '${scripts[scriptName]}'`, {
+      return await x(`/bin/sh -c '${scripts[scriptName].replace('node-gyp', env.npm_config_node_gyp)}'`, {
         verbose: true,
         cwd: location.replace(/^file:\/\//, ""),
         env

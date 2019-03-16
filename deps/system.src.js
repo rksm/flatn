@@ -1466,7 +1466,7 @@ var __exec;
 
   var hasBuffer = typeof Buffer != 'undefined';
   try {
-    if (hasBuffer && new Buffer('a').toString('base64') != 'YQ==')
+    if (hasBuffer && Buffer.from('a').toString('base64') != 'YQ==')
       hasBuffer = false;
   }
   catch(e) {
@@ -1476,7 +1476,7 @@ var __exec;
   var sourceMapPrefix = '\n//# sourceMappingURL=data:application/json;base64,';
   function inlineSourceMap(sourceMapString) {
     if (hasBuffer)
-      return sourceMapPrefix + new Buffer(sourceMapString).toString('base64');
+      return sourceMapPrefix +Buffer.from(sourceMapString).toString('base64');
     else if (typeof btoa != 'undefined')
       return sourceMapPrefix + btoa(unescape(encodeURIComponent(sourceMapString)));
     else
